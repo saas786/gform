@@ -25,14 +25,18 @@ import uk.gov.hmrc.gform.sharedmodel.{ LangADT, LocalisedString }
 
 object FormatParser {
 
-  def validate(rm: RoundingMode, emailVerification: EmailVerification)(expression: String): Opt[FormatExpr] =
-    validateWithParser(expression, expr(rm)(emailVerification))
+  def validate(
+    rm: RoundingMode,
+    selectionCriteria: Option[List[SelectionCriteria]],
+    emailVerification: EmailVerification)(expression: String): Opt[FormatExpr] =
+    validateWithParser(expression, expr(rm)(selectionCriteria)(emailVerification))
 
-  lazy val expr: RoundingMode => EmailVerification => Parser[FormatExpr] = rm =>
-    emailVerification => {
-      dateFormat |
-        textFormat(rm)(emailVerification) |
-        anyWordExpression
+  lazy val expr: RoundingMode => Option[List[SelectionCriteria]] => EmailVerification => Parser[FormatExpr] = rm =>
+    selectionCriteria =>
+      emailVerification => {
+        dateFormat |
+          textFormat(rm)(selectionCriteria)(emailVerification) |
+          anyWordExpression
   }
 
   lazy val dateFormat: Parser[DateFormat] = {
@@ -107,17 +111,19 @@ object FormatParser {
     OffsetDate(offset)
   }
 
-  lazy val textFormat: RoundingMode => EmailVerification => Parser[FormatExpr] = rm =>
-    emailVerification => {
-      numberFormat(rm) |
-        positiveNumberFormat(rm) |
-        positiveWholeNumberFormat(rm) |
-        moneyFormat(rm) |
-        contactFormat(emailVerification) |
-        governmentIdFormat |
-        basicFormat |
-        countryCodeFormat
-  }
+  lazy val textFormat: RoundingMode => Option[List[SelectionCriteria]] => EmailVerification => Parser[FormatExpr] =
+    rm =>
+      selectionCriteria =>
+        emailVerification => {
+          numberFormat(rm) |
+            positiveNumberFormat(rm) |
+            positiveWholeNumberFormat(rm) |
+            moneyFormat(rm) |
+            contactFormat(emailVerification) |
+            governmentIdFormat |
+            basicFormat(selectionCriteria) |
+            countryCodeFormat
+    }
 
   lazy val countryCodeFormat: Parser[TextFormat] = {
     "countryCode" ^^ { (loc, _) =>
@@ -127,7 +133,7 @@ object FormatParser {
     }
   }
 
-  lazy val basicFormat: Parser[TextFormat] = {
+  lazy val basicFormat: Option[List[SelectionCriteria]] => Parser[TextFormat] = selectionCriteria => {
     "shortText" ^^ { (loc, _) =>
       TextFormat(ShortText.default)
     } | "shortText(" ~ positiveInteger ~ "," ~ positiveInteger ~ ")" ^^ { (_, _, min, _, max, _) =>
@@ -137,7 +143,7 @@ object FormatParser {
     } | "text(" ~ positiveInteger ~ "," ~ positiveInteger ~ ")" ^^ { (_, _, min, _, max, _) =>
       TextFormat(TextWithRestrictions(min, max))
     } | "lookup(" ~ register ~ ")" ^^ { (_, _, register, _) =>
-      TextFormat(Lookup(register))
+      TextFormat(Lookup(register, selectionCriteria))
     } | "submissionRef" ^^ { (_, _) =>
       TextFormat(SubmissionRefFormat)
     } | "referenceNumber(" ~ positiveInteger ~ ")" ^^ { (_, _, min, _) =>
@@ -299,4 +305,8 @@ object FormatParser {
     Map(LangADT.Cy -> cy)
   }
   //"format": "positiveNumber(11, 2, 'en':'litres','cy':'litrau')"
+
+  lazy val fieldId: Parser[String] = FormComponentId.unanchoredIdValidation ^^ { (_, id) =>
+    id
+  }
 }
